@@ -29,3 +29,10 @@ def split_db_2to1(D, L, seed=0):
     LTR = L[idxTrain]
     LVAL = L[idxTest]
     return (DTR, LTR), (DVAL, LVAL)
+
+def get_feature_names(file_path):
+    """Extract feature names from the header of a CSV file (excluding the label column)."""
+    with open(file_path, 'r') as f:
+        header = f.readline().strip().split(',')
+    # Exclude the last column (assumed to be the label)
+    return header[:-1]
