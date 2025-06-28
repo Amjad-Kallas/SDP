@@ -27,10 +27,6 @@ def main():
         8: 'Age'
     }
 
-    w, b = model.train_logistic_regression(DTR, LTR)
-    print(w, b)
-    print("---------------------------------")
-
     # Example: Logistic Regression using scikit-learn
     w_sklearn, b_sklearn = model.train_logistic_regression_sklearn(DTR, LTR)
     print("[sklearn Logistic Regression] Weights:", w_sklearn)

@@ -13,13 +13,94 @@ def interpret_plot_command(text, feature_names=None, default_feature=0):
         if feature_names:
             feature_names_clean = [f.lower().replace(' ', '') for f in feature_names]
             feature_clean = feature.lower().replace(' ', '')
-            print("feature_names_clean:", feature_names_clean)
-            print("feature_clean:", feature_clean)
             if feature_clean in feature_names_clean:
                 feature_idx = feature_names_clean.index(feature_clean)
                 return plot_type, feature_idx, group
             else:
-                print("Feature not found!")
+                return None  # Feature not found
+        else:
+            return None
+
+    # New: "show feature <feature> <analysis_type>"
+    m = re.search(r"show feature ([\w ]+?) ([\w ]+?)(?: for ([\w ]+?))?$", text)
+    if m:
+        feature = m.group(1).strip()
+        analysis_type = m.group(2).strip()
+        group = m.group(3).strip() if m.group(3) else None
+        
+        # Map feature name to index
+        if feature_names:
+            feature_names_clean = [f.lower().replace(' ', '') for f in feature_names]
+            feature_clean = feature.lower().replace(' ', '')
+            if feature_clean in feature_names_clean:
+                feature_idx = feature_names_clean.index(feature_clean)
+                
+                # Map analysis type to plot type
+                if analysis_type in ['distribution', 'distributions']:
+                    return "feature_distributions", feature_idx, group
+                elif analysis_type in ['statistics', 'statistic']:
+                    return "feature_statistics_comparison", feature_idx, group
+                elif analysis_type in ['p-values', 'p values', 'pvalues']:
+                    return "p_values_comparison", feature_idx, group
+                elif analysis_type in ['histogram']:
+                    return "histogram", feature_idx, group
+            else:
+                return None  # Feature not found
+        else:
+            return None
+
+    # New: "show <feature> <analysis_type>"
+    m = re.search(r"show ([\w ]+?) ([\w ]+?)(?: for ([\w ]+?))?$", text)
+    if m:
+        feature = m.group(1).strip()
+        analysis_type = m.group(2).strip()
+        group = m.group(3).strip() if m.group(3) else None
+        
+        # Map feature name to index
+        if feature_names:
+            feature_names_clean = [f.lower().replace(' ', '') for f in feature_names]
+            feature_clean = feature.lower().replace(' ', '')
+            if feature_clean in feature_names_clean:
+                feature_idx = feature_names_clean.index(feature_clean)
+                
+                # Map analysis type to plot type
+                if analysis_type in ['distribution', 'distributions']:
+                    return "feature_distributions", feature_idx, group
+                elif analysis_type in ['statistics', 'statistic']:
+                    return "feature_statistics_comparison", feature_idx, group
+                elif analysis_type in ['p-values', 'p values', 'pvalues']:
+                    return "p_values_comparison", feature_idx, group
+                elif analysis_type in ['histogram']:
+                    return "histogram", feature_idx, group
+            else:
+                return None  # Feature not found
+        else:
+            return None
+
+    # New: "show <analysis_type> for <feature>"
+    m = re.search(r"show ([\w ]+?) for ([\w ]+?)(?: for ([\w ]+?))?$", text)
+    if m:
+        analysis_type = m.group(1).strip()
+        feature = m.group(2).strip()
+        group = m.group(3).strip() if m.group(3) else None
+        
+        # Map feature name to index
+        if feature_names:
+            feature_names_clean = [f.lower().replace(' ', '') for f in feature_names]
+            feature_clean = feature.lower().replace(' ', '')
+            if feature_clean in feature_names_clean:
+                feature_idx = feature_names_clean.index(feature_clean)
+                
+                # Map analysis type to plot type
+                if analysis_type in ['distribution', 'distributions']:
+                    return "feature_distributions", feature_idx, group
+                elif analysis_type in ['statistics', 'statistic']:
+                    return "feature_statistics_comparison", feature_idx, group
+                elif analysis_type in ['p-values', 'p values', 'pvalues']:
+                    return "p_values_comparison", feature_idx, group
+                elif analysis_type in ['histogram']:
+                    return "histogram", feature_idx, group
+            else:
                 return None  # Feature not found
         else:
             return None
@@ -62,6 +143,31 @@ def interpret_plot_command(text, feature_names=None, default_feature=0):
         feature = int(match.group(1))
         cls = int(match.group(2))
         return ("frequency spectrum", feature, cls)
+
+    # New: Statistical analysis patterns
+    # "show statistical separation ranking"
+    if re.search(r"statistical separation ranking", text):
+        return ("statistical_separation_ranking", None, None)
+    
+    # "show discriminative power"
+    if re.search(r"discriminative power", text):
+        return ("discriminative_power", None, None)
+    
+    # "show p values comparison"
+    if re.search(r"p.?values? comparison", text):
+        return ("p_values_comparison", None, None)
+    
+    # "show feature statistics comparison"
+    if re.search(r"feature statistics comparison", text):
+        return ("feature_statistics_comparison", None, None)
+    
+    # "show feature distributions"
+    if re.search(r"feature distributions", text):
+        return ("feature_distributions", None, None)
+    
+    # "comprehensive statistical analysis"
+    if re.search(r"comprehensive statistical analysis", text):
+        return ("comprehensive_analysis", None, None)
 
     return None
 

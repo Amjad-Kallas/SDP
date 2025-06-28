@@ -39,13 +39,6 @@ def train_logistic_regression(DTR, LTR, reg_lambda=0.0):
     return (result[0][:-1], result[0][-1])  # return w and b
 
 
-# will NOT be used
-def train_using_library(DTR, LTR, reg_lambda=0.001):
-    DTR_T = DTR.T
-    model = LogisticRegression(penalty='l2', C=1/reg_lambda)
-    model.fit(DTR_T, LTR)
-    return model.coef_[0], model.intercept_[0]
-
 def train_logistic_regression_sklearn(DTR, LTR, reg_lambda=0.001):
     """
     Train logistic regression using scikit-learn's LogisticRegression.

@@ -18,11 +18,11 @@ def feature_statistical_separation(D, L, group_labels=(0, 1)):
             feat_stats[f"std_{group}"] = np.std(group_data)
             feat_stats[f"var_{group}"] = np.var(group_data)
         # Separation scores (absolute difference between groups)
-        feat_stats["mean_diff"] = abs(feat_stats["mean_0"] - feat_stats["mean_1"])
-        feat_stats["median_diff"] = abs(feat_stats["median_0"] - feat_stats["median_1"])
-        feat_stats["mode_diff"] = abs(feat_stats["mode_0"] - feat_stats["mode_1"])
-        feat_stats["std_diff"] = abs(feat_stats["std_0"] - feat_stats["std_1"])
-        feat_stats["var_diff"] = abs(feat_stats["var_0"] - feat_stats["var_1"])
+        feat_stats["mean_diff"] = abs(feat_stats[f"mean_{group_labels[0]}"] - feat_stats[f"mean_{group_labels[1]}"])
+        feat_stats["median_diff"] = abs(feat_stats[f"median_{group_labels[0]}"] - feat_stats[f"median_{group_labels[1]}"])
+        feat_stats["mode_diff"] = abs(feat_stats[f"mode_{group_labels[0]}"] - feat_stats[f"mode_{group_labels[1]}"])
+        feat_stats["std_diff"] = abs(feat_stats[f"std_{group_labels[0]}"] - feat_stats[f"std_{group_labels[1]}"])
+        feat_stats["var_diff"] = abs(feat_stats[f"var_{group_labels[0]}"] - feat_stats[f"var_{group_labels[1]}"])
         results[f"feature_{feat_idx}"] = feat_stats
     return results
 
