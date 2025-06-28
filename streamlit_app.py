@@ -466,4 +466,4 @@ if user_cmd:
             st.pyplot(fig)
         # Add more plot types as needed
     else:
-        st.warning("Could not interpret your request. Try: 'show statistical separation ranking', 'show glucose distribution', 'show feature glucose statistics', or 'show feature distribution for glucose'.")
+        st.warning("Could not interpret your request. Try: 'show statistical separation ranking', 'show glucose distribution', 'show feature glucose statistics', 'show feature distribution for glucose', 'show distribution for all features', or 'show all features statistics'.")
