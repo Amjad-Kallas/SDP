@@ -21,58 +21,284 @@ def interpret_plot_command_with_llama(text, feature_names=None, default_feature=
 
     feature_list = ", ".join([f"{i}: {name}" for i, name in enumerate(feature_names)]) if feature_names else ""
 
-    prompt = f"""
-You are a helpful data analysis assistant. The user will describe a plot they want from diabetes data. You must return a valid JSON object with the following fields:
+    # Try multiple prompt strategies
+    prompts = [
+        # Strategy 1: Direct JSON generation
+        f"""Generate JSON for diabetes data analysis. Return ONLY valid JSON.
 
-{{
-  "plot_type": "histogram" | "boxplot" | "scatter" | "correlation" | "distribution" | "statistics" | "decision_boundary",
-  "feature_name": "<feature name from list below>",
-  "feature_index": <index from the list>,
-  "class_filter": "all" | "ok" | "ko" | "compare",
-  "additional_params": {{ }}
-}}
+FEATURES: {feature_list}
 
-INSTRUCTIONS:
-- If the user says things like "how X behaves" or "what does X look like", use plot_type = "histogram".
-- If the user mentions both "ok" and "ko", set class_filter = "compare".
-- Match the feature name to the closest match from this list and provide the correct index.
-- IMPORTANT: If the feature is "Blood Pressure", set the feature_index to 2.
-- 
+RULES:
+- "distribution" → plot_type: "histogram"
+- "decision boundary" or "decision" → plot_type: "decision_boundary" (requires two features)
+- "Blood Pressure" → feature_index: 2
+- "for ok" or "ok class" → class_filter: "ok"
+- "for ko" or "ko class" → class_filter: "ko"
+- "for all" or "all classes" → class_filter: "all"
+- "compare" or "both" → class_filter: "compare"
+- No class specified → class_filter: "compare"
+- Match feature names exactly from the list above
 
-FEATURES:
-{feature_list}
+INPUT: "{text}"
+OUTPUT:""",
+        
+        # Strategy 2: Structured format
+        f"""You are a data analysis assistant. Parse this request and return JSON.
 
-USER INPUT: "{text}"
+Available features: {feature_list}
 
-Respond with JSON only:
-###
-"""
+Request: "{text}"
 
+Class detection:
+- "for ok" = "ok" class only
+- "for ko" = "ko" class only  
+- "for all" = all classes combined
+- "compare" = both classes separately
+- Default = "compare"
 
-    try:
-        print(f"Llama-2 processing query: {text}")
-        response = llm(prompt=prompt, max_tokens=200, temperature=0.1, stop=["###"])
-        result_text = response['choices'][0]['text'].strip()
+Decision boundary format (for two features):
+{{"plot_type": "decision_boundary", "feature1_index": 1, "feature2_index": 5, "feature1_name": "Glucose", "feature2_name": "BMI", "class_filter": "compare", "additional_params": {{}}}}
 
-        match = re.search(r"\{.*?\}", result_text, re.DOTALL)
-        if not match:
-            raise ValueError("No valid JSON found")
+Single feature format:
+{{"plot_type": "histogram", "feature_name": "BMI", "feature_index": 5, "class_filter": "compare", "additional_params": {{}}}}
 
-        result = json.loads(match.group())
-        print(f"Parsed JSON: {result}")
-        print("----------------------------------------------------------------")
-        print(text, feature_names)
-        if 'plot_type' in result and 'feature_index' in result:
-            return (
-                result['plot_type'],
-                result['feature_index'],
-                result.get('class_filter', 'all'),
-                result.get('additional_params', {})
-            )
-    except Exception as e:
-        print(f"Llama-2 parsing failed: {e}")
+JSON:""",
+        
+        # Strategy 3: Simple mapping
+        f"""Map this request to JSON format.
 
-    print("Falling back to regex parsing")
+Features: {feature_list}
+Request: "{text}"
+
+Rules:
+- "distribution" = histogram
+- "decision boundary" = decision_boundary (needs two features)
+- "Blood Pressure" = index 2
+- "BMI" = index 5
+- "Glucose" = index 1
+- "Pregnancies" = index 0
+- "Skin Thickness" = index 3
+- "Insulin" = index 4
+- "DPF" = index 6
+- "Age" = index 7
+- "for ok" = ok class
+- "for ko" = ko class
+- "for all" = all classes
+- "compare" = both classes
+
+JSON:"""
+    ]
+
+    for i, prompt in enumerate(prompts):
+        try:
+            print(f"Llama-2 trying strategy {i+1} for query: {text}")
+            response = llm(prompt=prompt, max_tokens=128, temperature=0.0, stop=["\n", "###"])
+            result_text = response['choices'][0]['text'].strip()
+
+            print(f"Strategy {i+1} response: {result_text}")
+
+            # Try to extract JSON
+            result = None
+            
+            # Method 1: Direct JSON parsing
+            try:
+                result = json.loads(result_text)
+            except:
+                pass
+            
+            # Method 2: Extract JSON from text
+            if not result:
+                match = re.search(r"\{.*?\}", result_text, re.DOTALL)
+                if match:
+                    try:
+                        result = json.loads(match.group())
+                    except:
+                        pass
+            
+            # Method 3: Extract individual fields
+            if not result:
+                plot_type_match = re.search(r'"plot_type":\s*"([^"]+)"', result_text)
+                feature_index_match = re.search(r'"feature_index":\s*(\d+)', result_text)
+                feature_name_match = re.search(r'"feature_name":\s*"([^"]+)"', result_text)
+                
+                if plot_type_match and feature_index_match:
+                    result = {
+                        "plot_type": plot_type_match.group(1),
+                        "feature_index": int(feature_index_match.group(1)),
+                        "feature_name": feature_name_match.group(1) if feature_name_match else "Unknown",
+                        "class_filter": "compare",
+                        "additional_params": {}
+                    }
+            
+            # Method 4: Manual mapping based on text content
+            if not result:
+                text_lower = text.lower()
+                
+                # Check for decision boundary requests first
+                if "decision boundary" in text_lower or "decision" in text_lower:
+                    # Extract two features for decision boundary
+                    feature1_idx = None
+                    feature2_idx = None
+                    feature1_name = None
+                    feature2_name = None
+                    
+                    # Check for feature pairs
+                    if "bmi" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 5
+                            feature1_name = "BMI"
+                        else:
+                            feature2_idx = 5
+                            feature2_name = "BMI"
+                    if "blood pressure" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 2
+                            feature1_name = "Blood Pressure"
+                        else:
+                            feature2_idx = 2
+                            feature2_name = "Blood Pressure"
+                    if "glucose" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 1
+                            feature1_name = "Glucose"
+                        else:
+                            feature2_idx = 1
+                            feature2_name = "Glucose"
+                    if "pregnancies" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 0
+                            feature1_name = "Pregnancies"
+                        else:
+                            feature2_idx = 0
+                            feature2_name = "Pregnancies"
+                    if "skin thickness" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 3
+                            feature1_name = "Skin Thickness"
+                        else:
+                            feature2_idx = 3
+                            feature2_name = "Skin Thickness"
+                    if "insulin" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 4
+                            feature1_name = "Insulin"
+                        else:
+                            feature2_idx = 4
+                            feature2_name = "Insulin"
+                    if "dpf" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 6
+                            feature1_name = "DPF"
+                        else:
+                            feature2_idx = 6
+                            feature2_name = "DPF"
+                    if "age" in text_lower:
+                        if feature1_idx is None:
+                            feature1_idx = 7
+                            feature1_name = "Age"
+                        else:
+                            feature2_idx = 7
+                            feature2_name = "Age"
+                    
+                    if feature1_idx is not None and feature2_idx is not None:
+                        result = {
+                            "plot_type": "decision_boundary",
+                            "feature1_index": feature1_idx,
+                            "feature2_index": feature2_idx,
+                            "feature1_name": feature1_name,
+                            "feature2_name": feature2_name,
+                            "class_filter": "compare",
+                            "additional_params": {}
+                        }
+                
+                # If not decision boundary, handle single feature requests
+                if not result:
+                    # Determine plot type
+                    if "distribution" in text_lower or "histogram" in text_lower:
+                        plot_type = "histogram"
+                    elif "boxplot" in text_lower:
+                        plot_type = "boxplot"
+                    elif "scatter" in text_lower:
+                        plot_type = "scatter"
+                    elif "statistics" in text_lower:
+                        plot_type = "statistics"
+                    else:
+                        plot_type = "histogram"  # default
+                    
+                    # Determine class filter
+                    class_filter = "compare"  # default to comparing both classes
+                    if "for ok" in text_lower or "ok class" in text_lower or "ok only" in text_lower:
+                        class_filter = "ok"
+                    elif "for ko" in text_lower or "ko class" in text_lower or "ko only" in text_lower:
+                        class_filter = "ko"
+                    elif "for all" in text_lower or "all classes" in text_lower:
+                        class_filter = "all"
+                    elif "compare" in text_lower or "both" in text_lower:
+                        class_filter = "compare"
+                    
+                    # Determine feature index
+                    feature_index = None
+                    feature_name = None
+                    
+                    if "bmi" in text_lower:
+                        feature_index = 5
+                        feature_name = "BMI"
+                    elif "blood pressure" in text_lower:
+                        feature_index = 2
+                        feature_name = "Blood Pressure"
+                    elif "glucose" in text_lower:
+                        feature_index = 1
+                        feature_name = "Glucose"
+                    elif "pregnancies" in text_lower:
+                        feature_index = 0
+                        feature_name = "Pregnancies"
+                    elif "skin thickness" in text_lower:
+                        feature_index = 3
+                        feature_name = "Skin Thickness"
+                    elif "insulin" in text_lower:
+                        feature_index = 4
+                        feature_name = "Insulin"
+                    elif "dpf" in text_lower:
+                        feature_index = 6
+                        feature_name = "DPF"
+                    elif "age" in text_lower:
+                        feature_index = 7
+                        feature_name = "Age"
+                    
+                    if feature_index is not None:
+                        result = {
+                            "plot_type": plot_type,
+                            "feature_index": feature_index,
+                            "feature_name": feature_name,
+                            "class_filter": class_filter,
+                            "additional_params": {}
+                        }
+            
+            # If we got a valid result, return it
+            if result and 'plot_type' in result:
+                print(f"Strategy {i+1} succeeded!")
+                
+                # Handle decision boundary results (they have two feature indices)
+                if result['plot_type'] == 'decision_boundary' and 'feature1_index' in result and 'feature2_index' in result:
+                    return (
+                        result['plot_type'],
+                        result['feature1_index'],
+                        result['feature2_index']
+                    )
+                # Handle regular single-feature results
+                elif 'feature_index' in result:
+                    return (
+                        result['plot_type'],
+                        result['feature_index'],
+                        result.get('class_filter', 'all'),
+                        result.get('additional_params', {})
+                    )
+                
+        except Exception as e:
+            print(f"Strategy {i+1} failed: {e}")
+            continue
+
+    print("All Llama-2 strategies failed, falling back to regex parsing")
     return interpret_plot_command(text, feature_names, default_feature)
 
 def interpret_plot_command(text, feature_names=None, default_feature=0):

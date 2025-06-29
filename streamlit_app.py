@@ -135,22 +135,20 @@ for i, query in enumerate(example_queries):
         if st.button(f"💬 {query}", key=f"example_{i}"):
             st.session_state.user_query = query
 
-# User input
-user_query = st.text_input(
+# Initialize session state once
+if "user_query" not in st.session_state:
+    st.session_state.user_query = ""
+
+# User input with session state key
+st.text_input(
     "🎯 Describe your analysis request:",
-    value=st.session_state.get('user_query', ''),
-    placeholder="e.g., 'show BMI feature distribution' or 'plot histogram of Glucose for KO'"
+    placeholder="e.g., 'show BMI feature distribution' or 'plot histogram of Glucose for KO'",
+    key="user_query"
 )
 
-# Clear session state after using it for example buttons
-if 'user_query' in st.session_state:
-    del st.session_state.user_query
-
-if user_query:
-    # Show processing message
+if st.session_state.user_query:
     with st.spinner("🤖 AI is processing your request..."):
-        # Try Llama-2 first, fallback to regex
-        parsed = naturalLanguage.interpret_plot_command_with_llama(user_query, feature_names)
+        parsed = naturalLanguage.interpret_plot_command_with_llama(st.session_state.user_query, feature_names)
         
         if parsed:
             if len(parsed) == 4:  # Llama-2 response
