@@ -1,11 +1,11 @@
 import re
-from llama_cpp import Llama
 import json
+from llama_cpp import Llama
 
 # Initialize Llama-2 model
 try:
     llm = Llama(
-        model_path="./llama-2-7b-chat.Q4_K_M.gguf",  # Adjust path as needed
+        model_path="./llama-2-7b-chat.Q4_K_M.gguf",
         n_ctx=2048,
         n_threads=4
     )
@@ -15,39 +15,53 @@ except Exception as e:
     LLAMA_AVAILABLE = False
 
 def interpret_plot_command_with_llama(text, feature_names=None, default_feature=0):
-    """
-    Use Llama-2 to interpret natural language plot commands
-    """
     if not LLAMA_AVAILABLE:
+        print("Llama-2 not available, falling back to regex")
         return interpret_plot_command(text, feature_names, default_feature)
-    
-    # Create a prompt for Llama-2
+
     feature_list = ", ".join([f"{i}: {name}" for i, name in enumerate(feature_names)]) if feature_names else ""
-    
-    prompt = f"""You are a data analysis assistant. Given a user's natural language request for plotting diabetes data, extract the following information in JSON format:
-- plot_type: "histogram", "boxplot", "scatter", "correlation", "distribution", "statistics", or "decision_boundary"
-- feature_name: the feature to plot (from the available features)
-- feature_index: the index of the feature (0-7)
-- class_filter: "all", "ok", "ko", or "compare"
-- additional_params: any additional parameters
 
-IMPORTANT RULES:
-1. When users ask for "feature distribution" or "show distribution", use "compare" as class_filter to show OK vs KO classes with different colors for better insights.
-2. When users ask for "feature statistics" or "show statistics", use plot_type "statistics" and class_filter "compare" to show detailed statistical parameters for both classes.
-3. When users ask for "decision boundary between X and Y", use plot_type "decision_boundary" and set feature_name to the first feature (X).
+    prompt = f"""
+You are a helpful data analysis assistant. The user will describe a plot they want from diabetes data. You must return a valid JSON object with the following fields:
 
-Available features: {feature_list}
+{{
+  "plot_type": "histogram" | "boxplot" | "scatter" | "correlation" | "distribution" | "statistics" | "decision_boundary",
+  "feature_name": "<feature name from list below>",
+  "feature_index": <index from the list>,
+  "class_filter": "all" | "ok" | "ko" | "compare",
+  "additional_params": {{ }}
+}}
 
-User request: "{text}"
+INSTRUCTIONS:
+- If the user says things like "how X behaves" or "what does X look like", use plot_type = "histogram".
+- If the user mentions both "ok" and "ko", set class_filter = "compare".
+- Match the feature name to the closest match from this list and provide the correct index.
+- IMPORTANT: If the feature is "Blood Pressure", set the feature_index to 2.
+- 
 
-Respond with only valid JSON:
+FEATURES:
+{feature_list}
+
+USER INPUT: "{text}"
+
+Respond with JSON only:
+###
 """
-    
+
+
     try:
-        response = llm(prompt, max_tokens=200, temperature=0.1, stop=["\n\n"])
-        result = json.loads(response['choices'][0]['text'].strip())
-        
-        # Validate and return the parsed result
+        print(f"Llama-2 processing query: {text}")
+        response = llm(prompt=prompt, max_tokens=200, temperature=0.1, stop=["###"])
+        result_text = response['choices'][0]['text'].strip()
+
+        match = re.search(r"\{.*?\}", result_text, re.DOTALL)
+        if not match:
+            raise ValueError("No valid JSON found")
+
+        result = json.loads(match.group())
+        print(f"Parsed JSON: {result}")
+        print("----------------------------------------------------------------")
+        print(text, feature_names)
         if 'plot_type' in result and 'feature_index' in result:
             return (
                 result['plot_type'],
@@ -57,141 +71,96 @@ Respond with only valid JSON:
             )
     except Exception as e:
         print(f"Llama-2 parsing failed: {e}")
-    
-    # Fallback to regex parsing
+
+    print("Falling back to regex parsing")
     return interpret_plot_command(text, feature_names, default_feature)
 
 def interpret_plot_command(text, feature_names=None, default_feature=0):
-    """
-    Enhanced regex-based parsing with more patterns
-    """
-    text = text.lower()
-    
-    # Enhanced patterns for better matching
+    text = re.sub(r'\s+', ' ', text).strip().lower()  # normalize whitespace
     patterns = [
-        # "show BMI feature distribution"
         r"show\s+([\w\s]+)\s+feature\s+distribution",
-        # "show BMI feature statistics"
         r"show\s+([\w\s]+)\s+feature\s+statistics",
-        # "plot decision boundary between X and Y" - MORE SPECIFIC FIRST
         r"plot\s+decision\s+boundary\s+between\s+([\w\s]+)\s+and\s+([\w\s]+)",
-        # "show decision boundary for X vs Y" - MORE SPECIFIC FIRST
         r"show\s+decision\s+boundary\s+for\s+([\w\s]+)\s+vs\s+([\w\s]+)",
-        # "show correlation between X and Y"
         r"show\s+correlation\s+between\s+([\w\s]+)\s+and\s+([\w\s]+)",
-        # "compare BMI distributions"
         r"compare\s+([\w\s]+)\s+distributions",
-        # "plot histogram of Glucose for KO" - GENERAL PLOT PATTERN LAST
-        r"plot\s+(histogram|boxplot|scatter)\s+of\s+([\w\s]+?)(?:\s+for\s+(ok|ko|all))?",
-        # "display BMI distribution for OK class"
+        r"plot\s+(histogram|boxplot|scatter)\s+of\s+([\w\s]+?)\s+for\s+(ok|ko|all)",
+        r"plot\s+(histogram|boxplot|scatter)\s+of\s+([\w\s]+)",
         r"display\s+([\w\s]+)\s+distribution\s+for\s+(ok|ko|all)\s+class",
-        # "histogram of feature X for class Y"
         r"(histogram|boxplot|scatter).*feature\s+(\d+).*class\s+(\d+)",
-        # "feature ranking top X"
         r"feature\s+ranking\s+top\s+(\d+)",
     ]
-    
+
     for i, pattern in enumerate(patterns):
         match = re.search(pattern, text)
         if match:
-            # Pattern 0: "show BMI feature distribution"
             if i == 0:
-                feature = match.group(1)
-                return _parse_feature_request(feature, "histogram", "compare", feature_names)
-            # Pattern 1: "show BMI feature statistics"
+                return _parse_feature_request(match.group(1), "histogram", "compare", feature_names)
             elif i == 1:
-                feature = match.group(1)
-                return _parse_feature_request(feature, "statistics", "compare", feature_names)
-            # Pattern 2: "plot decision boundary between X and Y"
-            elif i == 2:
-                feature1 = match.group(1).strip()
-                feature2 = match.group(2).strip()
-                return _parse_decision_boundary_request(feature1, feature2, feature_names)
-            # Pattern 3: "show decision boundary for X vs Y"
-            elif i == 3:
-                feature1 = match.group(1).strip()
-                feature2 = match.group(2).strip()
-                return _parse_decision_boundary_request(feature1, feature2, feature_names)
-            # Pattern 4: "show correlation between X and Y"
+                return _parse_feature_request(match.group(1), "statistics", "compare", feature_names)
+            elif i in [2, 3]:
+                return _parse_decision_boundary_request(match.group(1), match.group(2), feature_names)
             elif i == 4:
-                feature1 = match.group(1).strip()
-                feature2 = match.group(2).strip()
-                return _parse_correlation_request(feature1, feature2, feature_names)
-            # Pattern 5: "compare BMI distributions"
+                return _parse_correlation_request(match.group(1), match.group(2), feature_names)
             elif i == 5:
-                feature = match.group(1)
-                return _parse_feature_request(feature, "histogram", "compare", feature_names)
-            # Pattern 6: "plot histogram of Glucose for KO"
+                return _parse_feature_request(match.group(1), "histogram", "compare", feature_names)
             elif i == 6:
-                plot_type = match.group(1)
-                feature = match.group(2).strip()
-                group = match.group(3) if match.group(3) else "all"
-                return _parse_feature_request(feature, plot_type, group, feature_names)
-            # Pattern 7: "display BMI distribution for OK class"
+                return _parse_feature_request(match.group(2).strip(), match.group(1), match.group(3) or "all", feature_names)
             elif i == 7:
-                feature = match.group(1)
-                group = match.group(2)
-                return _parse_feature_request(feature, "histogram", group, feature_names)
-            # Pattern 8: "histogram of feature X for class Y"
+                return _parse_feature_request(match.group(2), match.group(1), "all", feature_names)
             elif i == 8:
-                plot_type = match.group(1)
-                feature = int(match.group(2))
-                cls = int(match.group(3))
-                group = "ok" if cls == 0 else "ko"
-                return (plot_type, feature, group)
-            # Pattern 9: "feature ranking top X"
+                return _parse_feature_request(match.group(1), "histogram", match.group(2), feature_names)
             elif i == 9:
-                top_k = int(match.group(1))
-                return ("feature_ranking", top_k, None)
-    
+                feature = int(match.group(2))
+                group = "ok" if int(match.group(3)) == 0 else "ko"
+                return match.group(1), feature, group
+            elif i == 10:
+                return "feature_ranking", int(match.group(1)), None
+
     return None
 
 def _parse_feature_request(feature, plot_type, group, feature_names):
-    """Helper function to parse feature requests"""
+    print("------------------------------------------------------------")
     if feature_names:
-        feature_names_clean = [f.lower().replace(' ', '') for f in feature_names]
-        feature_clean = feature.lower().replace(' ', '')
-        
-        if feature_clean in feature_names_clean:
-            feature_idx = feature_names_clean.index(feature_clean)
-            return plot_type, feature_idx, group
+        feature_map = {
+            f.lower().replace(' ', ''): (i, f) for i, f in enumerate(feature_names)
+        }
+        feature_clean = feature.strip().lower().replace(' ', '')
+        print(f"[DEBUG] Normalized feature: '{feature_clean}'")
+
+        if feature_clean in feature_map:
+            idx, _ = feature_map[feature_clean]
+
+            # Manual fix for 'blood pressure'
+            if feature_clean == "bloodpressure":
+                print("[MANUAL FIX] Adjusting index +1 for 'blood pressure'")
+                idx = 2
+
+            print(f"[DEBUG] Final match index: {idx}")
+            return plot_type, idx, group
         else:
-            print(f"Feature '{feature}' not found in available features!")
-            return None
+            print(f"[WARN] Feature '{feature_clean}' not found")
+    print("------------------------------------------------------------")
     return None
 
-def _parse_correlation_request(feature1, feature2, feature_names):
-    """Helper function to parse correlation requests"""
+def _parse_correlation_request(f1, f2, feature_names):
     if feature_names:
-        feature_names_clean = [f.lower().replace(' ', '') for f in feature_names]
-        feature1_clean = feature1.lower().replace(' ', '')
-        feature2_clean = feature2.lower().replace(' ', '')
-        
-        if feature1_clean in feature_names_clean and feature2_clean in feature_names_clean:
-            idx1 = feature_names_clean.index(feature1_clean)
-            idx2 = feature_names_clean.index(feature2_clean)
-            return ("correlation", idx1, idx2)
+        clean = [f.lower().replace(' ', '') for f in feature_names]
+        f1, f2 = f1.lower().replace(' ', ''), f2.lower().replace(' ', '')
+        if f1 in clean and f2 in clean:
+            return "correlation", clean.index(f1), clean.index(f2)
     return None
 
-def _parse_decision_boundary_request(feature1, feature2, feature_names):
-    """Helper function to parse decision boundary requests"""
+def _parse_decision_boundary_request(f1, f2, feature_names):
     if feature_names:
-        feature_names_clean = [f.lower().replace(' ', '') for f in feature_names]
-        feature1_clean = feature1.lower().replace(' ', '')
-        feature2_clean = feature2.lower().replace(' ', '')
-        
-        if feature1_clean in feature_names_clean and feature2_clean in feature_names_clean:
-            idx1 = feature_names_clean.index(feature1_clean)
-            idx2 = feature_names_clean.index(feature2_clean)
-            return ("decision_boundary", idx1, idx2)
-        else:
-            print(f"Features '{feature1}' or '{feature2}' not found in available features!")
-            return None
+        clean = [f.lower().replace(' ', '') for f in feature_names]
+        f1, f2 = f1.lower().replace(' ', ''), f2.lower().replace(' ', '')
+        if f1 in clean and f2 in clean:
+            return "decision_boundary", clean.index(f1), clean.index(f2)
     return None
 
 def generate_plot_description(plot_type, feature_name, class_filter="all"):
-    """Generate a natural language description of the plot"""
-    descriptions = {
+    desc = {
         "histogram": f"Histogram of {feature_name} distribution",
         "boxplot": f"Boxplot of {feature_name} values",
         "scatter": f"Scatter plot of {feature_name}",
@@ -200,13 +169,10 @@ def generate_plot_description(plot_type, feature_name, class_filter="all"):
         "statistics": f"Detailed statistics for {feature_name}",
         "decision_boundary": f"Decision boundary analysis"
     }
-    
-    base_desc = descriptions.get(plot_type, f"{plot_type} of {feature_name}")
-    
-    if class_filter == "all":
-        return f"{base_desc} for all classes"
-    elif class_filter == "compare":
-        return f"{base_desc} comparing OK and KO classes"
+    base = desc.get(plot_type, f"{plot_type} of {feature_name}")
+    if class_filter == "compare":
+        return f"{base} comparing OK and KO classes"
+    elif class_filter == "all":
+        return f"{base} for all classes"
     else:
-        return f"{base_desc} for {class_filter.upper()} class"
-
+        return f"{base} for {class_filter.upper()} class"

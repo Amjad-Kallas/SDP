@@ -124,7 +124,6 @@ example_queries = [
     "plot decision boundary between Glucose and BMI",
     "plot histogram of Glucose for KO",
     "compare BMI distributions",
-    "show correlation between Glucose and BMI",
     "display Blood Pressure distribution for OK class",
     "plot boxplot of Age for all classes"
 ]
@@ -143,9 +142,11 @@ user_query = st.text_input(
     placeholder="e.g., 'show BMI feature distribution' or 'plot histogram of Glucose for KO'"
 )
 
+# Clear session state after using it for example buttons
+if 'user_query' in st.session_state:
+    del st.session_state.user_query
+
 if user_query:
-    st.session_state.user_query = user_query
-    
     # Show processing message
     with st.spinner("🤖 AI is processing your request..."):
         # Try Llama-2 first, fallback to regex
@@ -231,15 +232,6 @@ if user_query:
                 # For scatter plots, we need two features
                 st.warning("Scatter plots require two features. Please specify both features.")
                 
-            elif plot_type == "correlation":
-                if len(parsed) >= 3 and isinstance(parsed[1], int) and isinstance(parsed[2], int):
-                    feature1_idx, feature2_idx = parsed[1], parsed[2]
-                    fig = plot.plot_correlation(DTR, LTR, feature1_idx, feature2_idx, 
-                                              feature_names[feature1_idx], feature_names[feature2_idx])
-                    st.pyplot(fig)
-                else:
-                    st.warning("Correlation analysis requires two features.")
-                    
             elif plot_type == "decision_boundary":
                 # Feature indices are already extracted above
                 st.subheader(f"🎯 Decision Boundary Analysis")
@@ -342,7 +334,6 @@ if user_query:
             st.markdown("- `show [feature] feature distribution`")
             st.markdown("- `plot histogram of [feature] for [OK/KO/all]`")
             st.markdown("- `compare [feature] distributions`")
-            st.markdown("- `show correlation between [feature1] and [feature2]`")
 
 # Footer
 st.markdown("---")
