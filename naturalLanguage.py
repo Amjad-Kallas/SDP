@@ -17,7 +17,8 @@ except Exception as e:
 def interpret_plot_command_with_llama(text, feature_names=None, default_feature=0):
     if not LLAMA_AVAILABLE:
         print("Llama-2 not available, falling back to regex")
-        return interpret_plot_command(text, feature_names, default_feature)
+        result = interpret_plot_command(text, feature_names, default_feature)
+        return result if result else ("error", "Sorry, I couldn't understand your request. Please try rephrasing it.", None)
 
     feature_list = ", ".join([f"{i}: {name}" for i, name in enumerate(feature_names)]) if feature_names else ""
 
@@ -31,12 +32,14 @@ FEATURES: {feature_list}
 RULES:
 - "distribution" → plot_type: "histogram"
 - "decision boundary" or "decision" → plot_type: "decision_boundary" (requires two features)
+- "t-test" or "ttest" → plot_type: "t_test"
 - "Blood Pressure" → feature_index: 2
 - "for ok" or "ok class" → class_filter: "ok"
 - "for ko" or "ko class" → class_filter: "ko"
 - "for all" or "all classes" → class_filter: "all"
 - "compare" or "both" → class_filter: "compare"
 - No class specified → class_filter: "compare"
+- T-test stats: "mean", "median", "mode", "variance", "std", "standard deviation"
 - Match feature names exactly from the list above
 
 INPUT: "{text}"
@@ -56,8 +59,15 @@ Class detection:
 - "compare" = both classes separately
 - Default = "compare"
 
+T-test detection:
+- "t-test" or "ttest" = statistical test
+- "mean", "median", "mode", "variance", "std", "standard deviation" = statistical measures
+
 Decision boundary format (for two features):
 {{"plot_type": "decision_boundary", "feature1_index": 1, "feature2_index": 5, "feature1_name": "Glucose", "feature2_name": "BMI", "class_filter": "compare", "additional_params": {{}}}}
+
+T-test format:
+{{"plot_type": "t_test", "feature_name": "BMI", "feature_index": 5, "stat_measure": "mean", "class_filter": "compare", "additional_params": {{}}}}
 
 Single feature format:
 {{"plot_type": "histogram", "feature_name": "BMI", "feature_index": 5, "class_filter": "compare", "additional_params": {{}}}}
@@ -73,6 +83,7 @@ Request: "{text}"
 Rules:
 - "distribution" = histogram
 - "decision boundary" = decision_boundary (needs two features)
+- "t-test" or "ttest" = t_test
 - "Blood Pressure" = index 2
 - "BMI" = index 5
 - "Glucose" = index 1
@@ -85,6 +96,7 @@ Rules:
 - "for ko" = ko class
 - "for all" = all classes
 - "compare" = both classes
+- "mean", "median", "mode", "variance", "std", "standard deviation" = statistical measures
 
 JSON:"""
     ]
@@ -134,8 +146,62 @@ JSON:"""
             if not result:
                 text_lower = text.lower()
                 
-                # Check for decision boundary requests first
-                if "decision boundary" in text_lower or "decision" in text_lower:
+                # Check for t-test requests first
+                if "t-test" in text_lower or "ttest" in text_lower:
+                    # Determine statistical measure
+                    stat_measure = "mean"  # default
+                    if "mean" in text_lower:
+                        stat_measure = "mean"
+                    elif "median" in text_lower:
+                        stat_measure = "median"
+                    elif "mode" in text_lower:
+                        stat_measure = "mode"
+                    elif "variance" in text_lower:
+                        stat_measure = "variance"
+                    elif "std" in text_lower or "standard deviation" in text_lower:
+                        stat_measure = "std"
+                    
+                    # Determine feature index
+                    feature_index = None
+                    feature_name = None
+                    
+                    if "bmi" in text_lower:
+                        feature_index = 5
+                        feature_name = "BMI"
+                    elif "blood pressure" in text_lower:
+                        feature_index = 2
+                        feature_name = "Blood Pressure"
+                    elif "glucose" in text_lower:
+                        feature_index = 1
+                        feature_name = "Glucose"
+                    elif "pregnancies" in text_lower:
+                        feature_index = 0
+                        feature_name = "Pregnancies"
+                    elif "skin thickness" in text_lower:
+                        feature_index = 3
+                        feature_name = "Skin Thickness"
+                    elif "insulin" in text_lower:
+                        feature_index = 4
+                        feature_name = "Insulin"
+                    elif "dpf" in text_lower:
+                        feature_index = 6
+                        feature_name = "DPF"
+                    elif "age" in text_lower:
+                        feature_index = 7
+                        feature_name = "Age"
+                    
+                    if feature_index is not None:
+                        result = {
+                            "plot_type": "t_test",
+                            "feature_index": feature_index,
+                            "feature_name": feature_name,
+                            "stat_measure": stat_measure,
+                            "class_filter": "compare",
+                            "additional_params": {}
+                        }
+                
+                # Check for decision boundary requests
+                elif "decision boundary" in text_lower or "decision" in text_lower:
                     # Extract two features for decision boundary
                     feature1_idx = None
                     feature2_idx = None
@@ -211,7 +277,7 @@ JSON:"""
                             "additional_params": {}
                         }
                 
-                # If not decision boundary, handle single feature requests
+                # If not t-test or decision boundary, handle single feature requests
                 if not result:
                     # Determine plot type
                     if "distribution" in text_lower or "histogram" in text_lower:
@@ -285,6 +351,15 @@ JSON:"""
                         result['feature1_index'],
                         result['feature2_index']
                     )
+                # Handle t-test results (they have stat_measure)
+                elif result['plot_type'] == 't_test' and 'feature_index' in result and 'stat_measure' in result:
+                    return (
+                        result['plot_type'],
+                        result['feature_index'],
+                        result.get('class_filter', 'all'),
+                        result.get('additional_params', {}),
+                        result['stat_measure']
+                    )
                 # Handle regular single-feature results
                 elif 'feature_index' in result:
                     return (
@@ -299,7 +374,8 @@ JSON:"""
             continue
 
     print("All Llama-2 strategies failed, falling back to regex parsing")
-    return interpret_plot_command(text, feature_names, default_feature)
+    result = interpret_plot_command(text, feature_names, default_feature)
+    return result if result else ("error", "Sorry, I couldn't understand your request. Please try rephrasing it.", None)
 
 def interpret_plot_command(text, feature_names=None, default_feature=0):
     text = re.sub(r'\s+', ' ', text).strip().lower()  # normalize whitespace
@@ -315,6 +391,9 @@ def interpret_plot_command(text, feature_names=None, default_feature=0):
         r"display\s+([\w\s]+)\s+distribution\s+for\s+(ok|ko|all)\s+class",
         r"(histogram|boxplot|scatter).*feature\s+(\d+).*class\s+(\d+)",
         r"feature\s+ranking\s+top\s+(\d+)",
+        r"t-test\s+([\w\s]+)\s+(mean|median|mode|variance|std|standard\s+deviation)",
+        r"ttest\s+([\w\s]+)\s+(mean|median|mode|variance|std|standard\s+deviation)",
+        r"test\s+([\w\s]+)\s+(mean|median|mode|variance|std|standard\s+deviation)",
     ]
 
     for i, pattern in enumerate(patterns):
@@ -342,11 +421,12 @@ def interpret_plot_command(text, feature_names=None, default_feature=0):
                 return match.group(1), feature, group
             elif i == 10:
                 return "feature_ranking", int(match.group(1)), None
+            elif i in [11, 12, 13]:
+                return _parse_t_test_request(match.group(1), match.group(2), feature_names)
 
     return None
 
 def _parse_feature_request(feature, plot_type, group, feature_names):
-    print("------------------------------------------------------------")
     if feature_names:
         feature_map = {
             f.lower().replace(' ', ''): (i, f) for i, f in enumerate(feature_names)
@@ -359,14 +439,9 @@ def _parse_feature_request(feature, plot_type, group, feature_names):
 
             # Manual fix for 'blood pressure'
             if feature_clean == "bloodpressure":
-                print("[MANUAL FIX] Adjusting index +1 for 'blood pressure'")
                 idx = 2
 
-            print(f"[DEBUG] Final match index: {idx}")
             return plot_type, idx, group
-        else:
-            print(f"[WARN] Feature '{feature_clean}' not found")
-    print("------------------------------------------------------------")
     return None
 
 def _parse_correlation_request(f1, f2, feature_names):
@@ -383,6 +458,15 @@ def _parse_decision_boundary_request(f1, f2, feature_names):
         f1, f2 = f1.lower().replace(' ', ''), f2.lower().replace(' ', '')
         if f1 in clean and f2 in clean:
             return "decision_boundary", clean.index(f1), clean.index(f2)
+    return None
+
+def _parse_t_test_request(feature, stat_measure, feature_names):
+    if feature_names:
+        clean = [f.lower().replace(' ', '') for f in feature_names]
+        feature_clean = feature.lower().replace(' ', '')
+        if feature_clean in clean:
+            feature_idx = clean.index(feature_clean)
+            return "t_test", feature_idx, "compare", {}, stat_measure
     return None
 
 def generate_plot_description(plot_type, feature_name, class_filter="all"):

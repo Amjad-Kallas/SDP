@@ -1,9 +1,9 @@
 import streamlit as st
 import utils
 import stats
-import matplotlib.pyplot as plt
 import plot
 import naturalLanguage
+import numpy as np
 
 st.set_page_config(page_title="Diabetes Analysis with AI", layout="wide")
 
@@ -23,91 +23,6 @@ feature_names = [
     'Insulin', 'BMI', 'DPF', 'Age'
 ]
 
-# Sidebar for traditional actions
-st.sidebar.header("📊 Traditional Analysis")
-action = st.sidebar.selectbox(
-    "Choose an action:",
-    [
-        "Show dataset info",
-        "Show feature importances (Logistic Regression)",
-        "Show feature importances (SVM)",
-        "Show statistical separation",
-        "Plot histogram (feature)",
-        "Plot boxplot (feature)",
-    ]
-)
-
-# Traditional analysis section
-if action == "Show dataset info":
-    st.subheader("📋 Dataset Info")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Training samples", DTR.shape[1])
-    with col2:
-        st.metric("Validation samples", DVAL.shape[1])
-    with col3:
-        st.metric("Features", len(feature_names))
-    
-    st.write("**Available Features:**")
-    for i, name in enumerate(feature_names):
-        st.write(f"  {i}: {name}")
-
-elif action == "Show feature importances (Logistic Regression)":
-    from model import train_logistic_regression_sklearn
-    w_sklearn, b_sklearn = train_logistic_regression_sklearn(DTR, LTR)
-    importances = abs(w_sklearn.flatten())
-    
-    st.subheader("🔍 Logistic Regression Feature Importances")
-    
-    # Create a sorted list of (feature_name, importance)
-    feature_importance = [(feature_names[i], imp) for i, imp in enumerate(importances)]
-    feature_importance.sort(key=lambda x: x[1], reverse=True)
-    
-    # Display as metrics
-    cols = st.columns(4)
-    for i, (feature, importance) in enumerate(feature_importance):
-        with cols[i % 4]:
-            st.metric(feature, f"{importance:.4f}")
-
-elif action == "Show feature importances (SVM)":
-    from model import train_svm
-    svm_model = train_svm(DTR, LTR, C=1.0, kernel='linear')
-    if hasattr(svm_model, 'coef_'):
-        importances = abs(svm_model.coef_.flatten())
-        st.subheader("🔍 SVM Feature Importances")
-        
-        feature_importance = [(feature_names[i], imp) for i, imp in enumerate(importances)]
-        feature_importance.sort(key=lambda x: x[1], reverse=True)
-        
-        cols = st.columns(4)
-        for i, (feature, importance) in enumerate(feature_importance):
-            with cols[i % 4]:
-                st.metric(feature, f"{importance:.4f}")
-    else:
-        st.warning("SVM model does not provide feature importances for this kernel.")
-
-elif action == "Show statistical separation":
-    separation = stats.rank_separating_statistics(DTR, LTR)
-    st.subheader("📈 Statistical Separation (by average difference)")
-    
-    # Create a sorted list
-    separation_sorted = sorted(separation, key=lambda x: x[1], reverse=True)
-    
-    cols = st.columns(4)
-    for i, (stat, diff) in enumerate(separation_sorted):
-        with cols[i % 4]:
-            st.metric(f"Feature {stat}", f"{diff:.4f}")
-
-elif action == "Plot histogram (feature)":
-    feature_idx = st.selectbox("Select feature:", list(enumerate(feature_names)), format_func=lambda x: x[1])[0]
-    fig = plot.plot_histogram(DTR, LTR, feature_idx, feature_names[feature_idx], "compare")
-    st.pyplot(fig)
-
-elif action == "Plot boxplot (feature)":
-    feature_idx = st.selectbox("Select feature:", list(enumerate(feature_names)), format_func=lambda x: x[1])[0]
-    fig = plot.plot_boxplot(DTR, LTR, feature_idx, feature_names[feature_idx], "compare")
-    st.pyplot(fig)
-
 # Main AI Assistant Section
 st.markdown("---")
 st.subheader("🤖 AI Assistant: Natural Language Analysis")
@@ -125,7 +40,10 @@ example_queries = [
     "plot histogram of Glucose for KO",
     "compare BMI distributions",
     "display Blood Pressure distribution for OK class",
-    "plot boxplot of Age for all classes"
+    "plot boxplot of Age for all classes",
+    "t-test BMI mean",
+    "t-test Glucose median",
+    "t-test Blood Pressure variance"
 ]
 
 # Display example queries as clickable buttons
@@ -151,11 +69,18 @@ if st.session_state.user_query:
         parsed = naturalLanguage.interpret_plot_command_with_llama(st.session_state.user_query, feature_names)
         
         if parsed:
+            if parsed[0] == "error":
+                st.error(parsed[1])
+                st.stop()
+                
             if len(parsed) == 4:  # Llama-2 response
                 plot_type, feature_idx, class_filter, additional_params = parsed
+            elif len(parsed) == 5:  # T-test response
+                plot_type, feature_idx, class_filter, additional_params, stat_measure = parsed
             else:  # Regex fallback
                 plot_type, feature_idx, class_filter = parsed
                 additional_params = {}
+                stat_measure = "mean"  # default for t-tests
             
             # Handle decision boundary requests differently
             if plot_type == "decision_boundary":
@@ -164,6 +89,8 @@ if st.session_state.user_query:
                     st.success(f"✅ AI understood: Decision boundary analysis between {feature_names[feature1_idx]} and {feature_names[feature2_idx]}")
                 else:
                     st.warning("Decision boundary analysis requires two features.")
+            elif plot_type == "t_test":
+                st.success(f"✅ AI understood: T-test for {stat_measure} of {feature_names[feature_idx]}")
             else:
                 st.success(f"✅ AI understood: {naturalLanguage.generate_plot_description(plot_type, feature_names[feature_idx], class_filter)}")
             
@@ -226,6 +153,65 @@ if st.session_state.user_query:
                 fig = plot.plot_statistics_summary(DTR, LTR, feature_idx, feature_names[feature_idx])
                 st.pyplot(fig)
                 
+            elif plot_type == "t_test":
+                # Display t-test for specific statistical measure
+                st.subheader(f"🔬 T-Test for {stat_measure.title()} of {feature_names[feature_idx]}")
+                
+                # Get data for both classes
+                ok_data = DTR[feature_idx, LTR == 0]
+                ko_data = DTR[feature_idx, LTR == 1]
+                
+                # Calculate the specific statistical measure
+                from scipy import stats
+                
+                if stat_measure == "mean":
+                    ok_stat = np.mean(ok_data)
+                    ko_stat = np.mean(ko_data)
+                elif stat_measure == "median":
+                    ok_stat = np.median(ok_data)
+                    ko_stat = np.median(ko_data)
+                elif stat_measure == "mode":
+                    ok_stat = stats.mode(ok_data, keepdims=True)[0][0]
+                    ko_stat = stats.mode(ko_data, keepdims=True)[0][0]
+                elif stat_measure == "variance":
+                    ok_stat = np.var(ok_data)
+                    ko_stat = np.var(ko_data)
+                elif stat_measure == "std":
+                    ok_stat = np.std(ok_data)
+                    ko_stat = np.std(ko_data)
+                else:
+                    ok_stat = np.mean(ok_data)
+                    ko_stat = np.mean(ko_data)
+                
+                # Perform t-test
+                t_stat, p_value = stats.ttest_ind(ok_data, ko_data)
+                
+                # Display results
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.subheader("🟢 OK Class")
+                    st.metric(f"{stat_measure.title()}", f"{ok_stat:.4f}")
+                    st.metric("Count", len(ok_data))
+                
+                with col2:
+                    st.subheader("🔴 KO Class")
+                    st.metric(f"{stat_measure.title()}", f"{ko_stat:.4f}")
+                    st.metric("Count", len(ko_data))
+                
+                with col3:
+                    st.subheader("📊 T-Test Results")
+                    st.metric("T-statistic", f"{t_stat:.4f}")
+                    st.metric("P-value", f"{p_value:.4f}")
+                    if p_value < 0.05:
+                        st.success("✅ Significant difference")
+                    else:
+                        st.warning("❌ No significant difference")
+                
+                # Show difference
+                diff = abs(ok_stat - ko_stat)
+                st.metric(f"Difference in {stat_measure}", f"{diff:.4f}")
+                
             elif plot_type == "scatter":
                 # For scatter plots, we need two features
                 st.warning("Scatter plots require two features. Please specify both features.")
@@ -284,46 +270,7 @@ if st.session_state.user_query:
                 # Display rankings
                 for i, (stat, diff) in enumerate(separation[:top_k]):
                     st.metric(f"{feature_names[stat]}", f"{diff:.4f}", delta=f"Rank {i+1}")
-            
-            # Add additional analysis options
-            st.markdown("---")
-            st.subheader("🔍 Additional Analysis Options")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("📊 Comprehensive Comparison", key="comp_comp"):
-                    fig = plot.plot_feature_comparison(DTR, LTR, feature_idx, feature_names[feature_idx])
-                    st.pyplot(fig)
-            
-            with col2:
-                if st.button("📈 Distribution Analysis", key="dist_analysis"):
-                    fig = plot.plot_distribution_analysis(DTR, LTR, feature_idx, feature_names[feature_idx])
-                    st.pyplot(fig)
-            
-            with col3:
-                if st.button("📋 Statistical Summary", key="stat_summary"):
-                    ok_data = DTR[feature_idx, LTR == 0]
-                    ko_data = DTR[feature_idx, LTR == 1]
-                    
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        st.subheader("OK Class Statistics")
-                        st.metric("Mean", f"{ok_data.mean():.2f}")
-                        st.metric("Std", f"{ok_data.std():.2f}")
-                        st.metric("Count", len(ok_data))
-                    
-                    with col_b:
-                        st.subheader("KO Class Statistics")
-                        st.metric("Mean", f"{ko_data.mean():.2f}")
-                        st.metric("Std", f"{ko_data.std():.2f}")
-                        st.metric("Count", len(ko_data))
-                    
-                    # T-test
-                    from scipy import stats
-                    t_stat, p_value = stats.ttest_ind(ok_data, ko_data)
-                    st.metric("T-test p-value", f"{p_value:.4f}")
-                    
+        
         else:
             st.error("❌ Sorry, I couldn't understand your request. Please try one of the example queries or rephrase your request.")
             
@@ -332,6 +279,7 @@ if st.session_state.user_query:
             st.markdown("- `show [feature] feature distribution`")
             st.markdown("- `plot histogram of [feature] for [OK/KO/all]`")
             st.markdown("- `compare [feature] distributions`")
+            st.markdown("- `t-test [feature] [mean/median/mode/variance/std]`")
 
 # Footer
 st.markdown("---")
