@@ -213,8 +213,7 @@ if st.session_state.user_query:
                 st.metric(f"Difference in {stat_measure}", f"{diff:.4f}")
                 
             elif plot_type == "scatter":
-                # For scatter plots, we need two features
-                st.warning("Scatter plots require two features. Please specify both features.")
+                st.info("Scatter plot functionality is not available yet. Please try another type of analysis or visualization.")
                 
             elif plot_type == "decision_boundary":
                 # Feature indices are already extracted above
